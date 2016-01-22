@@ -1,8 +1,9 @@
 from deps.sockshandler import SocksiPyHandler
+from threading import Thread
 import deps.socks as socks
+import httplib
 import logging
 import os
-import requests
 import shutil
 import socket
 import string
@@ -12,18 +13,23 @@ import tempfile
 import time
 import urllib2
 
-
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
 log = logging.getLogger(__name__)
-logging.getLogger("requests").setLevel(logging.WARNING)
+log.addHandler(logging.NullHandler())
 
+
+class Response(object):
+    def __init__(self, text, status_code):
+        self.text = text
+        self.status_code = status_code
 
 class Tor:
 
     instances = []
+    order = []
     data_dir = os.path.join(sys._MEIPASS, 'data') if hasattr(sys, '_MEIPASS') else tempfile.mkdtemp()
 
 
@@ -32,7 +38,8 @@ class Tor:
         self.id = self.get_id()
 
         self.log = logging.getLogger('%s_%s' % (__name__, self.id))
-        self.log_file_path = log_file_path
+        self.log.addHandler(logging.NullHandler())
+        self.log_file_path = None
         self.log_level = log_level
 
         self.__class__.instances.insert(self.id, self)
@@ -40,10 +47,15 @@ class Tor:
         if not hasattr(self, 'tor_cmd'):
             self.discover_tor_cmd(tor_path)
 
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+
         self.host = control_host
         self.socks_port = socks_port or start_port + self.id*2
         self.control_port = control_port or self.socks_port + 1
         self.generate_password()
+
+        self.changing_ip = True
 
         self.ip_services = [
             'http://ipinfo.io/ip',
@@ -53,34 +65,56 @@ class Tor:
             'http://checkip.amazonaws.com/'
         ]
         self.tor_process = None
+        self.ip = None
         self.run()
 
 
     def _del(self):
         self.log.debug('Cleaning temp data')
-        self.terminate()
+        self.stop()
         shutil.rmtree(os.path.join(self.data_dir, 'tor%s' % self.id), ignore_errors=True)
-        try:
-            self.__class__.instances.remove(self)
-        except:
-            pass
 
 
-    @staticmethod
-    def clean():
-        for one in Tor.instances:
+    @classmethod
+    def clean(cls):
+        for one in cls.instances:
             one._del()
-        Tor.instances = []
-        shutil.rmtree(Tor.data_dir, ignore_errors=True)
+        cls.instances = []
+        cls.order = []
+        shutil.rmtree(cls.data_dir, ignore_errors=True)
 
 
-    def check_ip(self):
-        for attempt in range(len(self.ip_services)):
+    @classmethod
+    def first(cls):
+        if len(cls.order):
+            return cls.order[0]
+
+
+
+    @classmethod
+    def next_tor(cls):
+        if cls.first():
+            if not cls.first().changing_ip:
+                Thread(target=cls.first().new_ip).start()
+                cls.order.append(cls.order.pop(0))
+                return True
+
+
+
+    def check_ip(self, attempts=None):
+        if not attempts:
+            attempts = len(self.ip_services)
+        for attempt in range(attempts):
             try:
-                return self.open(self.ip_services[0]).rstrip()
+                return self.get(self.ip_services[0], timeout=2).text.rstrip()
             except:
-                self.ip_services = self.ip_services+[self.ip_services.pop(0)]
+                self.ip_services.append(self.ip_services.pop(0))
             time.sleep(1)
+
+
+    def destroy(self):
+        self.__class__.instances.remove(self)
+        self._del()
 
 
     def discover_tor_cmd(self, tor_path):
@@ -107,6 +141,35 @@ class Tor:
         )
 
 
+    def get(self, url, data=None, headers=None, timeout=60):
+        self.log.debug('GET request to %s\nHeaders: %s\nTimeout: %s' % (url, headers, timeout))
+        text = None
+        status_code = None
+        opener = urllib2.build_opener(
+            SocksiPyHandler(socks.PROXY_TYPE_SOCKS5, self.host, self.socks_port)
+        )
+        if headers:
+            opener.addheaders = [item for item in headers.items()]
+        try:
+            response = opener.open(url, data, timeout)
+        except httplib.IncompleteRead as e:
+            response = e.partial
+        except Exception as e:
+            if hasattr(e, 'code'):
+                status_code = e.code
+            self.log.info('Failed to open %s, %s' % (url,e))
+        try:
+            text = response.read()
+        except:
+            pass
+        try:
+            status_code = status_code or response.getcode()
+        except:
+            pass
+
+        return Response(text, status_code)
+
+
     def get_id(self):
         ids = [one.id for one in self.__class__.instances]
         new_possible_id = len(ids)
@@ -116,15 +179,35 @@ class Tor:
         return new_possible_id
 
 
+    def get_pid(self):
+        with open(os.path.join(self.data_dir, '%s.pid' % self.id)) as f:
+            pid = f.read().strip()
+        return int(pid)
+
+
+    def halt(self):
+        return self.send_signal('HALT')
+
+
     def hash_password(self):
-        return subprocess.check_output(
-            [
-                Tor.tor_cmd,
-                '--quiet',
-                '--hash-password',
-                self.password
-            ]
-        ).strip()
+        while True:
+            hashed_password = subprocess.check_output(
+                [
+                    Tor.tor_cmd,
+                    '--quiet',
+                    '--hash-password',
+                    self.password
+                ]
+            ).strip()
+            if hashed_password:
+                return hashed_password
+
+
+    def kill(self):
+        try:
+            os.kill(self.get_pid(), 9)
+        except:
+            pass
 
 
     def new_id(self):
@@ -132,39 +215,39 @@ class Tor:
 
 
     def new_ip(self):
-        if not self.ip:
-            self.ip = self.check_ip()
-        if self.new_id():
-            while True:
-                for attempt in range(10):
-                    new_ip = self.check_ip()
-                    if new_ip and new_ip != self.ip:
-                        self.log.info('New IP: %s' % new_ip)
-                        self.ip = new_ip
-                        return new_ip
-                    time.sleep(1)
-            else:
+        if not self.changing_ip:
+            self.changing_ip = True
+            if not self.ip:
+                self.ip = self.check_ip()
+            if not hasattr(self, 'last_time_new_id'):
+                self.last_time_new_id = 0
+            if time.time() - self.last_time_new_id < 7:
+                log.debug('Restarting Tor to renew IP')
+                self.stop()
                 self.run()
-        else:
+                self.changing_ip = False
+                self.last_time_new_id = 0
+                return self.ip
+            else:
+                if self.new_id():
+                    log.debug('Cheking that IP cnanged')
+                    for attempt in range(2):
+                        new_ip = self.check_ip(1)
+                        if new_ip and new_ip != self.ip:
+                            self.log.info('New IP: %s' % new_ip)
+                            self.ip = new_ip
+                            self.changing_ip = False
+                            self.last_time_new_id = time.time()
+                            return new_ip
+                        time.sleep(1)
+            self.stop()
             self.run()
-            self.new_ip()
-
-
-    def open(self, url, headers=None):
-        opener = urllib2.build_opener(
-            SocksiPyHandler(socks.PROXY_TYPE_SOCKS4, self.host, self.socks_port)
-        )
-        if headers:
-            opener.addheaders = [item for item in headers.items()]
-        try:
-            return opener.open(url).read()
-        except Exception as e:
-            self.log.info('Failed to open %s, %s' % (url,repr(e)))
+            return self.ip
 
 
     def run(self):
-        self.log.info('Starting Tor process')
         while True:
+            self.log.info('Starting Tor process')
             try:
                 runtime_args = [
                     self.tor_cmd,
@@ -172,11 +255,13 @@ class Tor:
                     '--CookieAuthentication', '0',
                     '--HashedControlPassword', '%s' % self.hash_password(),
                     '--ControlPort', '%s' % self.control_port,
-                    '--PidFile', '%s/%s.pid' % (self.data_dir, self.id),
+                    '--PidFile', '%s.pid' % os.path.join(self.data_dir, '%s' % self.id),
                     '--SocksPort', '%s' % self.socks_port,
-                    '--DataDirectory', '%s/tor%s' % (self.data_dir, self.id)
+                    '--DataDirectory', '%s' % os.path.join(self.data_dir, 'tor%s' % self.id)
                 ]
                 if self.log_file_path:
+                    if not os.path.exists(self.data_dir):
+                            os.makedirs(self.data_dir)
                     logs_dir = os.path.abspath(self.log_file_path)
                     if not os.path.exists(logs_dir):
                             os.makedirs(logs_dir)
@@ -194,22 +279,25 @@ class Tor:
             except Exception as e:
                 self.log.error('Failed to start Tor process: %s' % repr(e))
                 return False
-            for attempt in range(3):
-                time.sleep(3)
+            for attempt in range(1):
+                time.sleep(1)
                 try:
                     self.tor_process = proc
-                    self.ip = self.check_ip()
-                    self.log.info('Tor successfully started, IP: %s' % self.ip)
-                    return True
+                    self.ip = self.check_ip(5)
+                    if self.ip:
+                        self.__class__.order.append(self)
+                        self.log.info('Tor successfully started, IP: %s' % self.ip)
+                        self.changing_ip = False
+                        return True
                 except:
-                    pass
+                    self.log.error('Tor not responding')
             self.log.error('Tor connection is not functional')
             try:
                 self.stop()
             except:
                 pass
             self.log.info('Retrying to start Tor process')
-            self.shutdown()
+            self.run()
 
 
     def send_signal(self, signal):
