@@ -20,7 +20,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.2'
+__version__ = '0.1.4'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -260,7 +260,6 @@ class Tor:
 
     def run(self):
         while True:
-            self.log.info('Starting Tor process')
             try:
                 runtime_args = [
                     self.tor_cmd,
