@@ -20,7 +20,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -28,64 +28,69 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 
+
+
 class Response(object):
     def __init__(self, text, status_code):
         self.text = text
         self.status_code = status_code
 
+
+
+
 class Tor:
 
-    instances = []
-    order = []
+    check_ip_atempts = 1
+    check_ip_timeout = 2
     data_dir = os.path.join(sys._MEIPASS, 'data') if hasattr(sys, '_MEIPASS') else tempfile.mkdtemp()
+    delta = 6
+    instances = []
+    ip = None
+    ip_services = [
+        'http://ipinfo.io/ip',
+        'http://ident.me/',
+        'http://ip.barjomet.com',
+        'http://icanhazip.com',
+        'http://checkip.amazonaws.com/'
+    ]
+    last_new_id_time = 0
+    log_file_path = None
+    log_level='notice'
+    order = []
+    tor_cmd = None
+    tor_path='Tor'
+    tor_process = None
 
 
-    def __init__(self, id=None, delta=3, tor_start=20, socks_port=None, control_host='127.0.0.1', control_port=None, start_port=9060, tor_path='Tor', log_file_path='log', log_level='notice'):
+    def __init__(self, id=None, password=None, socks_port=None, control_host='127.0.0.1', control_port=None, start_port=9060):
 
-        if id != None:
-            self.id =id
-        else:
-            self.id = self.get_id()
+        if id != None: self.id =id
+        else: self.id = self.get_id()
 
-        self.delta = delta
-        self.tor_start = tor_start
-        self.log = logging.getLogger('%s_%s' % (__name__, self.id+1))
-        self.log.addHandler(logging.NullHandler())
-        self.log_file_path = None
-        self.log_level = log_level
+        self.init_logging()
+
+        if password: self.password = password
+        else: self.generate_password()
 
         self.__class__.instances.insert(self.id, self)
-
-        if not hasattr(self, 'tor_cmd'):
-            self.discover_tor_cmd(tor_path)
-
-        if not os.path.exists(self.data_dir):
-            os.makedirs(self.data_dir)
 
         self.host = control_host
         self.socks_port = socks_port or start_port + self.id*2
         self.control_port = control_port or self.socks_port + 1
-        #self.generate_password()
-        self.password = 'HugeSecret'
+
+        if not self.tor_cmd: self.discover_tor_cmd()
+
+        if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
 
         self.changing_ip = True
-
-        self.ip_services = [
-            'http://ipinfo.io/ip',
-            'http://ident.me/',
-            'http://ip.barjomet.com',
-            'http://icanhazip.com',
-            'http://checkip.amazonaws.com/'
-        ]
-        self.tor_process = None
-        self.ip = None
         self.run()
 
 
     def __del(self):
         self.log.debug('Cleaning temp data')
         self.stop()
-        shutil.rmtree(os.path.join(self.data_dir, 'tor%s' % self.id), ignore_errors=True)
+        shutil.rmtree(os.path.join(self.data_dir, 'tor%s' % self.id),
+                      ignore_errors=True)
 
 
     @classmethod
@@ -98,31 +103,89 @@ class Tor:
 
 
     @classmethod
-    def first(cls):
-        if len(cls.order):
-            return cls.order[0]
+    def discover_tor_cmd(cls):
+        executable = 'tor.exe' if os.name == 'nt' else 'tor'
 
+        if cls.tor_path:
+            if hasattr(sys, '_MEIPASS'):
+                path = os.path.join(sys._MEIPASS, cls.tor_path)
+            else:
+                path = os.path.abspath(cls.tor_path)
+            cls.tor_cmd = os.path.join(path, executable)
+
+        if not cls.tor_path or not os.path.isfile(cls.tor_cmd):
+            cls.tor_cmd = 'tor.exe' if os.name == 'nt' else 'tor'
+
+        log.info(cls.version())
+
+
+    @classmethod
+    def first(cls):
+        if len(cls.order): return cls.order[0]
 
 
     @classmethod
     def next_tor(cls):
-        if cls.first():
-            if not cls.first().changing_ip:
-                Thread(target=cls.first().new_ip).start()
-                cls.order.append(cls.order.pop(0))
-                return True
+        if cls.first() and not cls.first().changing_ip:
+            Thread(target=cls.first().new_ip).start()
+            cls.order.append(cls.order.pop(0))
+            return True
 
 
+    @classmethod
+    def version(cls):
+        try:
+            version = subprocess.check_output([cls.tor_cmd,
+                                               '--quiet',
+                                               '--version'])
+            return version.rstrip()
+        except OSError as e:
+            if e.errno == os.errno.ENOENT:
+                log.debug('No executable "%s" found' % self.cls)
+            else:
+                log.debug(repr(e))
+                raise
 
-    def check_ip(self, attempts=None):
-        if not attempts:
-            attempts = len(self.ip_services)
-        for attempt in range(int(attempts)):
+
+    @property
+    def runtime_args(self):
+        args = [
+            self.tor_cmd,
+            '--quiet',
+            '--CookieAuthentication', '0',
+            '--HashedControlPassword', '%s' % self.hash_password(),
+            '--ControlPort', '%s' % self.control_port,
+            '--PidFile', '%s.pid' % os.path.join(self.data_dir,
+                                                 '%s' % self.id),
+            '--SocksPort', '%s' % self.socks_port,
+            '--DataDirectory', '%s' % os.path.join(self.data_dir,
+                                                   'tor%s' % self.id)
+        ]
+        if self.log_file_path:
+            if not os.path.exists(self.data_dir):
+                os.makedirs(self.data_dir)
+            logs_dir = os.path.abspath(self.log_file_path)
+            if not os.path.exists(logs_dir):
+                    os.makedirs(logs_dir)
+            args += [
+                '--Log', '{level} file {log_file}'.format(
+                    level = self.log_level or 'notice',
+                    log_file = os.path.join(
+                        logs_dir,
+                        'tor%s.log' % self.id
+                    )
+                )
+            ]
+        return args
+
+
+    def check_ip(self):
+        for attempt in range(len(self.ip_services)):
             try:
-                return self.get(self.ip_services[0], timeout=4).text.rstrip()
+                return self.get(self.ip_services[0],
+                                timeout=self.check_ip_timeout).text.rstrip()
             except:
                 self.ip_services.append(self.ip_services.pop(0))
-            time.sleep(1)
 
 
     def destroy(self):
@@ -130,20 +193,6 @@ class Tor:
         self.__del()
 
 
-    def discover_tor_cmd(self, tor_path):
-        executable = 'tor.exe' if os.name == 'nt' else 'tor'
-
-        if tor_path:
-            if hasattr(sys, '_MEIPASS'):
-                path = os.path.join(sys._MEIPASS, tor_path)
-            else:
-                path = os.path.abspath(tor_path)
-            self.__class__.tor_cmd = os.path.join(path, executable)
-
-        if not tor_path or not os.path.isfile(self.tor_cmd):
-            self.__class__.tor_cmd = executable
-
-        log.info(self.version())
 
 
     def generate_password(self):
@@ -155,11 +204,13 @@ class Tor:
 
 
     def get(self, url, data=None, headers=None, timeout=60):
-        self.log.debug('GET request to %s\nHeaders: %s\nTimeout: %s' % (url, headers, timeout))
+        self.log.debug('GET request to %s\nHeaders: %s\nTimeout: %s'
+                       % (url, headers, timeout))
         text = None
         status_code = None
         opener = urllib2.build_opener(
-            SocksiPyHandler(socks.PROXY_TYPE_SOCKS5, self.host, self.socks_port)
+            SocksiPyHandler(socks.PROXY_TYPE_SOCKS5,
+                            self.host, self.socks_port)
         )
         if headers:
             opener.addheaders = [item for item in headers.items()]
@@ -194,8 +245,8 @@ class Tor:
 
     def get_pid(self):
         with open(os.path.join(self.data_dir, '%s.pid' % self.id)) as f:
-            pid = f.read().strip()
-        return int(pid)
+            self.pid = int(f.read().strip())
+        return self.pid
 
 
     def halt(self):
@@ -216,11 +267,18 @@ class Tor:
                 return hashed_password
 
 
+    def init_logging(self):
+        self.log = logging.getLogger('%s_%s' % (__name__, self.id))
+        self.log.addHandler(logging.NullHandler())
+
+
     def kill(self):
         try:
-            os.kill(self.get_pid(), 9)
-        except:
-            pass
+            self.get_pid()
+            os.kill(self.pid, 9)
+        except Exception:
+            return False
+        return True
 
 
     def new_id(self):
@@ -232,88 +290,67 @@ class Tor:
             self.changing_ip = True
             if not self.ip:
                 self.ip = self.check_ip()
-            if not hasattr(self, 'last_time_new_id'):
-                self.last_time_new_id = 0
-            if time.time() - self.last_time_new_id < self.delta:
-                log.debug('Restarting Tor to renew IP')
-                self.stop()
-                self.run()
+            if time.time() - self.last_new_id_time < self.delta:
+                self.log.debug('Restarting Tor to renew IP')
+                self.restart()
                 self.changing_ip = False
-                self.last_time_new_id = 0
+                self.last_new_id_time = 0
                 return self.ip
             else:
                 if self.new_id():
                     self.log.debug('Checking that IP cnanged')
-                    for attempt in range(2):
-                        new_ip = self.check_ip(1)
+                    time.sleep(0.5)
+                    for attempt in range(self.check_ip_atempts):
+                        new_ip = self.check_ip()
                         if new_ip and new_ip != self.ip:
                             self.log.info('New IP: %s' % new_ip)
                             self.ip = new_ip
                             self.changing_ip = False
-                            self.last_time_new_id = time.time()
+                            self.last_new_id_time = time.time()
                             return new_ip
                         time.sleep(1)
-            self.stop()
-            self.run()
+            self.restart()
             return self.ip
+
+
+    def restart(self):
+        self.log.debug('Waiting until Tor daemon is dead')
+        while self.stop():
+            time.sleep(0.25)
+        return self.run()
 
 
     def run(self):
         while True:
-            try:
-                runtime_args = [
-                    self.tor_cmd,
-                    '--quiet',
-                    '--CookieAuthentication', '0',
-                    '--HashedControlPassword', '%s' % self.hash_password(),
-                    '--ControlPort', '%s' % self.control_port,
-                    '--PidFile', '%s.pid' % os.path.join(self.data_dir, '%s' % self.id),
-                    '--SocksPort', '%s' % self.socks_port,
-                    '--DataDirectory', '%s' % os.path.join(self.data_dir, 'tor%s' % self.id)
-                ]
-                if self.log_file_path:
-                    if not os.path.exists(self.data_dir):
-                            os.makedirs(self.data_dir)
-                    logs_dir = os.path.abspath(self.log_file_path)
-                    if not os.path.exists(logs_dir):
-                            os.makedirs(logs_dir)
-                    runtime_args += [
-                        '--Log', '{level} file {log_file}'.format(
-                            level = self.log_level or 'notice',
-                            log_file = os.path.join(
-                                logs_dir,
-                                'tor%s.log' % self.id
-                            )
-                        )
-                    ]
+            if not self.tor_started():
                 try:
-                    self.get_pid()
-                except Exception as e:
                     self.log.info('Starting Tor process')
-                    self.log.debug('Running: %s' % ' '.join(runtime_args))
-                    proc = subprocess.Popen(runtime_args)
-            except Exception as e:
-                self.log.error('Failed to start Tor process: %s' % repr(e))
-                return False
-            for attempt in range(1):
-                time.sleep(1)
+                    self.log.debug('Running: %s' % ' '.join(self.runtime_args))
+                    proc = subprocess.Popen(self.runtime_args)
+                    self.tor_process = proc
+                except Exception as e:
+                    self.log.error('Failed to start Tor process: %s' % repr(e))
+                    return False
+
+            time.sleep(0.5)
+            for attempt in range(self.check_ip_atempts):
                 try:
-                    #self.tor_process = proc
-                    self.ip = self.check_ip(self.tor_start)
+                    if self.tor_started(): self.ip = self.check_ip()
+                    else: sleep(1)
+
                     if self.ip:
                         self.__class__.order.append(self)
-                        self.log.info('Tor successfully started, IP: %s' % self.ip)
+                        self.log.info('Tor successfully started, IP: %s'
+                                      % self.ip)
                         self.changing_ip = False
                         return True
+
                 except Exception as e :
                     self.log.error('Tor not responding, %s' % e)
+
             self.log.error('Tor connection is not functional')
-            try:
-                self.stop()
-            except:
-                pass
-            self.log.info('Retrying to start Tor process')
-            return self.run()
+            self.log.info('Restarting Tor process')
+            return self.restart()
 
 
     def send_signal(self, signal):
@@ -345,8 +382,8 @@ class Tor:
 
 
     def stop(self):
-        if not self.shutdown():
-            self.kill()
+        if self.shutdown(): self.terminate()
+        else: self.kill()
 
 
     def terminate(self):
@@ -360,13 +397,9 @@ class Tor:
             return False
 
 
-    def version(self):
+    def tor_started(self):
         try:
-            version = subprocess.check_output([self.tor_cmd, '--quiet', '--version'])
-            return version.rstrip()
-        except OSError as e:
-            if e.errno == os.errno.ENOENT:
-                log.debug('No executable "%s" found' % self.tor_cmd)
-            else:
-                log.debug(repr(e))
-                raise
+            self.get_pid()
+            return True
+        except:
+            return False

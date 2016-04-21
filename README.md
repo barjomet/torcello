@@ -3,7 +3,13 @@ Torcello
 
 Just a Python module suitable to use multiple [Tor](https://www.torproject.org/) circuits at the same time
 
-Example usage:
+Installation
+============
+
+    pip install torcello
+
+Usage
+=====
 ```
 from torcello import Tor
 from threading import Thread
@@ -19,7 +25,7 @@ def do_something():
 for incident in range(5):
     Thread(target=do_something).start()
 ```
-also try rotating proxy:
+also try it as rotating proxy:
 ```
 from time import sleep
 from torcello import Tor
@@ -39,17 +45,5 @@ for incident in range(20):
     while not Tor.next_tor():
         sleep(1)
 
+# Delete all instances and close all Tor daemons
 Tor.clean()
-```
--------------------------------------------
-It depends on:
-
-[SocksiPyHandler](https://gist.github.com/e000/869791)
-
-[SocksiPy](http://socksipy.sourceforge.net/)
-
-A Python SOCKS module.
-
-(C) 2006 Dan-Haim. All rights reserved.
-
-See LICENSE file for details
