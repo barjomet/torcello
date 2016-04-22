@@ -20,7 +20,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.8'
+__version__ = '0.1.10'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -114,7 +114,7 @@ class Tor:
         if not cls.tor_path or not os.path.isfile(cls.tor_cmd):
             cls.tor_cmd = 'tor.exe' if os.name == 'nt' else 'tor'
 
-        self.log.info(cls.version())
+        cls.log.info(cls.version())
 
 
     @classmethod
@@ -139,9 +139,9 @@ class Tor:
             return version.rstrip()
         except OSError as e:
             if e.errno == os.errno.ENOENT:
-                self.log.debug('No executable "%s" found' % self.cls)
+                cls.log.debug('No executable "%s" found' % self.cls)
             else:
-                self.log.debug(repr(e))
+                cls.log.debug(repr(e))
                 raise
 
 
