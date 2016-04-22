@@ -20,12 +20,8 @@ import socks as socks
 
 
 
-__version__ = '0.1.5'
+__version__ = '0.1.6'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
-
-
-log = logging.getLogger(__name__)
-log.addHandler(logging.NullHandler())
 
 
 
@@ -54,6 +50,8 @@ class Tor:
         'http://checkip.amazonaws.com/'
     ]
     last_new_id_time = 0
+    log = logging.getLogger(__name__)
+    log.addHandler(logging.NullHandler())
     log_file_path = None
     log_level='notice'
     order = []
@@ -141,9 +139,9 @@ class Tor:
             return version.rstrip()
         except OSError as e:
             if e.errno == os.errno.ENOENT:
-                log.debug('No executable "%s" found' % self.cls)
+                self.log.debug('No executable "%s" found' % self.cls)
             else:
-                log.debug(repr(e))
+                self.log.debug(repr(e))
                 raise
 
 
@@ -336,7 +334,7 @@ class Tor:
             for attempt in range(self.check_ip_atempts):
                 try:
                     if self.tor_started(): self.ip = self.check_ip()
-                    else: sleep(1)
+                    else: time.sleep(1)
 
                     if self.ip:
                         self.__class__.order.append(self)
