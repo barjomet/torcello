@@ -20,7 +20,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.7'
+__version__ = '0.1.8'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -114,7 +114,7 @@ class Tor:
         if not cls.tor_path or not os.path.isfile(cls.tor_cmd):
             cls.tor_cmd = 'tor.exe' if os.name == 'nt' else 'tor'
 
-        log.info(cls.version())
+        self.log.info(cls.version())
 
 
     @classmethod
