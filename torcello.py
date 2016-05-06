@@ -2,6 +2,7 @@
 
 
 
+import cookielib
 import httplib
 import logging
 import os
@@ -13,6 +14,7 @@ import subprocess
 import tempfile
 import time
 from threading import Thread
+import urllib
 import urllib2
 
 from sockshandler import SocksiPyHandler
@@ -20,16 +22,20 @@ import socks as socks
 
 
 
-__version__ = '0.1.10'
+__version__ = '0.1.11'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
 
 
 class Response(object):
-    def __init__(self, text, status_code):
+
+    cookies = status_code = text = None
+
+    def __init__(self, text, status_code, cookies=None):
         self.text = text
         self.status_code = status_code
+        self.cookies = cookies
 
 
 
@@ -37,7 +43,7 @@ class Response(object):
 class Tor:
 
     check_ip_atempts = 1
-    check_ip_timeout = 2
+    check_ip_timeout = 3
     data_dir = os.path.join(sys._MEIPASS, 'data') if hasattr(sys, '_MEIPASS') else tempfile.mkdtemp()
     delta = 6
     instances = []
@@ -201,35 +207,8 @@ class Tor:
         )
 
 
-    def get(self, url, data=None, headers=None, timeout=60):
-        self.log.debug('GET request to %s\nHeaders: %s\nTimeout: %s'
-                       % (url, headers, timeout))
-        text = None
-        status_code = None
-        opener = urllib2.build_opener(
-            SocksiPyHandler(socks.PROXY_TYPE_SOCKS5,
-                            self.host, self.socks_port)
-        )
-        if headers:
-            opener.addheaders = [item for item in headers.items()]
-        try:
-            response = opener.open(url, data, timeout)
-        except httplib.IncompleteRead as e:
-            response = e.partial
-        except Exception as e:
-            if hasattr(e, 'code'):
-                status_code = e.code
-            self.log.debug('Failed to open %s, %s' % (url,e))
-        try:
-            text = response.read()
-        except:
-            pass
-        try:
-            status_code = status_code or response.getcode()
-        except:
-            pass
-
-        return Response(text, status_code)
+    def get(self, url, **kwargs):
+        return self.open(url, **kwargs)
 
 
     def get_id(self):
@@ -311,6 +290,42 @@ class Tor:
             return self.ip
 
 
+    def open(self, url, data=None, headers=None, cookies=None, timeout=60):
+        self.log.debug('%s request to %s\nHeaders: %s\nTimeout: %s'
+                       % ('GET' if data else 'POST', url, headers, timeout))
+        cookies = cookies or cookielib.LWPCookieJar()
+        opener = urllib2.build_opener(SocksiPyHandler(socks.PROXY_TYPE_SOCKS5,
+                                                      self.host, self.socks_port),
+                                      urllib2.HTTPCookieProcessor(cookies)
+        )
+        if headers:
+            opener.addheaders = [item for item in headers.items()]
+        try:
+            response = opener.open(url, data, timeout)
+        except httplib.IncompleteRead as e:
+            response = e.partial
+        except Exception as e:
+            if hasattr(e, 'code'):
+                status_code = e.code
+            self.log.debug('Failed to open %s, %s' % (url,e))
+        try:
+            text = response.read()
+        except Exception as e:
+            text = None
+            self.log.debug('Unable to read response content: %s' % repr(e))
+        try:
+            status_code = status_code or response.getcode()
+        except Exception as e:
+            status_code = None
+            self.log.debug('Error during getting response status code: %s' % repr(e))
+
+        return Response(text, status_code, cookies)
+
+
+    def post(self, url, data, **kwargs):
+        return self.open(url, data=urllib.urlencode(data), **kwargs)
+
+
     def restart(self):
         self.log.debug('Waiting until Tor daemon is dead')
         while self.stop():
@@ -338,8 +353,6 @@ class Tor:
 
                     if self.ip:
                         self.__class__.order.append(self)
-                        self.log.info('Tor successfully started, IP: %s'
-                                      % self.ip)
                         self.changing_ip = False
                         return True
 
