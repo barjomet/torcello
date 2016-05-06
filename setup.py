@@ -12,7 +12,7 @@ long_description = """How to use::
         tor = Tor()
         for one in range(5):
             response = tor.get('http://ip.barjomet.com')
-            print('Hooray, here is desired data: %s' %  response.txxext)
+            print('Hooray, here is desired data: %s' %  response.text)
             tor.new_ip()
         tor.destroy()
   
