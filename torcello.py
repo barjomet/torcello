@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.11'
+__version__ = '0.1.12'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -270,6 +270,7 @@ class Tor:
             if time.time() - self.last_new_id_time < self.delta:
                 self.log.debug('Restarting Tor to renew IP')
                 self.restart()
+                self.log.info('New IP: %s' % self.ip)
                 self.changing_ip = False
                 self.last_new_id_time = 0
                 return self.ip
