@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.12'
+__version__ = '0.1.13'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -36,6 +36,11 @@ class Response(object):
         self.text = text
         self.status_code = status_code
         self.cookies = cookies
+
+
+    def __repr__(self):
+        return "<TorcelloResponse status_code:%s at %s>" % (self.status_code,
+                                                       id(self))
 
 
 
@@ -88,6 +93,11 @@ class Tor:
 
         self.changing_ip = True
         self.run()
+
+
+    def __repr__(self):
+        return "<TorcelloTor id:%s, socks_port:%s, ip:%s at %s>" % \
+                (self.id, self.socks_port, self.ip, id(self))
 
 
     def __del(self):
@@ -299,6 +309,7 @@ class Tor:
                                                       self.host, self.socks_port),
                                       urllib2.HTTPCookieProcessor(cookies)
         )
+        status_code = None
         if headers:
             opener.addheaders = [item for item in headers.items()]
         try:
