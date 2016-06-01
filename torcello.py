@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.13'
+__version__ = '0.1.14'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -36,6 +36,14 @@ class Response(object):
         self.text = text
         self.status_code = status_code
         self.cookies = cookies
+
+
+    def __bool__(self):
+        if self.status_code in (200, 302):  return True
+        else: return False
+
+
+    __nonzero__=__bool__
 
 
     def __repr__(self):
