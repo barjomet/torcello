@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.14'
+__version__ = '0.1.15'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -328,6 +328,7 @@ class Tor:
             if hasattr(e, 'code'):
                 status_code = e.code
             self.log.debug('Failed to open %s, %s' % (url,e))
+            return Response(None, None, cookies)
         try:
             text = response.read()
         except Exception as e:
