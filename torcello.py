@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.15'
+__version__ = '0.1.16'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -47,8 +47,8 @@ class Response(object):
 
 
     def __repr__(self):
-        return "<TorcelloResponse status_code:%s at %s>" % (self.status_code,
-                                                       id(self))
+        return "<TorcelloResponse status_code:%s at %s>"
+               % (self.status_code, id(self))
 
 
 
@@ -57,7 +57,9 @@ class Tor:
 
     check_ip_atempts = 1
     check_ip_timeout = 3
-    data_dir = os.path.join(sys._MEIPASS, 'data') if hasattr(sys, '_MEIPASS') else tempfile.mkdtemp()
+    data_dir = (os.path.join(sys._MEIPASS, 'data')
+                if hasattr(sys, '_MEIPASS')
+                else tempfile.mkdtemp())
     delta = 6
     instances = []
     ip = None
@@ -79,7 +81,9 @@ class Tor:
     tor_process = None
 
 
-    def __init__(self, id=None, password=None, socks_port=None, control_host='127.0.0.1', control_port=None, start_port=9060):
+    def __init__(self, id=None, password=None,
+                 socks_port=None, control_host='127.0.0.1',
+                 control_port=None, start_port=9060):
 
         if id != None: self.id =id
         else: self.id = self.get_id()
@@ -158,8 +162,8 @@ class Tor:
     def version(cls):
         try:
             version = subprocess.check_output([cls.tor_cmd,
-                                               '--quiet',
-                                               '--version'])
+                                              '--quiet',
+                                              '--version'])
             return version.rstrip()
         except OSError as e:
             if e.errno == os.errno.ENOENT:
@@ -194,10 +198,7 @@ class Tor:
                     level = self.log_level or 'notice',
                     log_file = os.path.join(
                         logs_dir,
-                        'tor%s.log' % self.id
-                    )
-                )
-            ]
+                        'tor%s.log' % self.id))]
         return args
 
 
@@ -250,14 +251,11 @@ class Tor:
 
     def hash_password(self):
         while True:
-            hashed_password = subprocess.check_output(
-                [
-                    Tor.tor_cmd,
-                    '--quiet',
-                    '--hash-password',
-                    self.password
-                ]
-            ).strip()
+            hashed_password = subprocess.check_output([
+                Tor.tor_cmd,
+                '--quiet',
+                '--hash-password',
+                self.password]).strip()
             if hashed_password:
                 return hashed_password
 
@@ -313,10 +311,11 @@ class Tor:
         self.log.debug('%s request to %s\nHeaders: %s\nTimeout: %s'
                        % ('GET' if data else 'POST', url, headers, timeout))
         cookies = cookies or cookielib.LWPCookieJar()
-        opener = urllib2.build_opener(SocksiPyHandler(socks.PROXY_TYPE_SOCKS5,
-                                                      self.host, self.socks_port),
-                                      urllib2.HTTPCookieProcessor(cookies)
-        )
+        opener = urllib2.build_opener(
+            SocksiPyHandler(
+                socks.PROXY_TYPE_SOCKS5,
+                self.host, self.socks_port),
+            urllib2.HTTPCookieProcessor(cookies))
         status_code = None
         if headers:
             opener.addheaders = [item for item in headers.items()]
@@ -338,7 +337,8 @@ class Tor:
             status_code = status_code or response.getcode()
         except Exception as e:
             status_code = None
-            self.log.debug('Error during getting response status code: %s' % repr(e))
+            self.log.debug('Error during getting response status code: %s'
+                           % repr(e))
 
         return Response(text, status_code, cookies)
 
@@ -359,11 +359,13 @@ class Tor:
             if not self.tor_started():
                 try:
                     self.log.info('Starting Tor process')
-                    self.log.debug('Running: %s' % ' '.join(self.runtime_args))
+                    self.log.debug('Running: %s'
+                                   % ' '.join(self.runtime_args))
                     proc = subprocess.Popen(self.runtime_args)
                     self.tor_process = proc
                 except Exception as e:
-                    self.log.error('Failed to start Tor process: %s' % repr(e))
+                    self.log.error('Failed to start Tor process: %s'
+                                   % repr(e))
                     return False
 
             time.sleep(0.5)
