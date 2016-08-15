@@ -34,6 +34,7 @@ class Response(object):
 
     def __init__(self, text, status_code, cookies=None):
         self.text = text
+        self.content = self.text
         self.status_code = status_code
         self.cookies = cookies
 
@@ -85,7 +86,7 @@ class Tor:
                  socks_port=None, control_host='127.0.0.1',
                  control_port=None, start_port=9060):
 
-        if id != None: self.id =id
+        if id != None: self.id = id
         else: self.id = self.get_id()
 
         self.init_logging()
