@@ -22,7 +22,7 @@ import socks as socks
 
 
 
-__version__ = '0.1.16'
+__version__ = '0.2.0'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -48,7 +48,7 @@ class Response(object):
 
 
     def __repr__(self):
-        return "<TorcelloResponse status_code:%s at %s>"
+        return "<TorcelloResponse status_code:%s at %s>" \
                % (self.status_code, id(self))
 
 
