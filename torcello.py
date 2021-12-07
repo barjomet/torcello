@@ -2,8 +2,8 @@
 
 
 
-import cookielib
-import httplib
+import http.cookiejar
+import http.client
 import logging
 import os
 import shutil
@@ -14,15 +14,15 @@ import subprocess
 import tempfile
 import time
 from threading import Thread
-import urllib
-import urllib2
+import urllib.request, urllib.parse, urllib.error
+import urllib.request, urllib.error, urllib.parse
 
 from sockshandler import SocksiPyHandler
 import socks as socks
 
 
 
-__version__ = '0.2.0'
+__version__ = '0.3.1'
 __author__ = 'Oleksii Ivanchuk (barjomet@barjomet.com)'
 
 
@@ -48,8 +48,9 @@ class Response(object):
 
 
     def __repr__(self):
-        return "<TorcelloResponse status_code:%s at %s>" \
-               % (self.status_code, id(self))
+        return (
+            f"<TorcelloResponse status_code:{self.status_code}>"
+        )
 
 
 
@@ -67,7 +68,7 @@ class Tor:
     ip_services = [
         'http://ipinfo.io/ip',
         'http://ident.me/',
-        'http://ip.barjomet.com',
+        'https://api.ipify.org',
         'http://icanhazip.com',
         'http://checkip.amazonaws.com/'
     ]
@@ -109,14 +110,15 @@ class Tor:
 
 
     def __repr__(self):
-        return "<TorcelloTor id:%s, socks_port:%s, ip:%s at %s>" % \
-                (self.id, self.socks_port, self.ip, id(self))
+        return (f"<TorcelloTor id:{self.id}, "
+                f"socks_port:{self.socks_port}, "
+                f"ip:{self.ip}>")
 
 
     def __del(self):
         self.log.debug('Cleaning temp data')
         self.stop()
-        shutil.rmtree(os.path.join(self.data_dir, 'tor%s' % self.id),
+        shutil.rmtree(os.path.join(self.data_dir, f'tor{self.id}'),
                       ignore_errors=True)
 
 
@@ -168,7 +170,7 @@ class Tor:
             return version.rstrip()
         except OSError as e:
             if e.errno == os.errno.ENOENT:
-                cls.log.debug('No executable "%s" found' % self.cls)
+                cls.log.debug('No executable "%s" found', self.cls)
             else:
                 cls.log.debug(repr(e))
                 raise
@@ -186,7 +188,7 @@ class Tor:
                                                  '%s' % self.id),
             '--SocksPort', '%s' % self.socks_port,
             '--DataDirectory', '%s' % os.path.join(self.data_dir,
-                                                   'tor%s' % self.id)
+                                                   f'tor{self.id}')
         ]
         if self.log_file_path:
             if not os.path.exists(self.data_dir):
@@ -199,7 +201,7 @@ class Tor:
                     level = self.log_level or 'notice',
                     log_file = os.path.join(
                         logs_dir,
-                        'tor%s.log' % self.id))]
+                        f'tor{self.id}.log'))]
         return args
 
 
@@ -207,7 +209,7 @@ class Tor:
         for attempt in range(len(self.ip_services)):
             try:
                 return self.get(self.ip_services[0],
-                                timeout=self.check_ip_timeout).text.rstrip()
+                                timeout=self.check_ip_timeout).text.rstrip().decode()
             except:
                 self.ip_services.append(self.ip_services.pop(0))
 
@@ -241,7 +243,7 @@ class Tor:
 
 
     def get_pid(self):
-        with open(os.path.join(self.data_dir, '%s.pid' % self.id)) as f:
+        with open(os.path.join(self.data_dir, f'{self.id}.pid')) as f:
             self.pid = int(f.read().strip())
         return self.pid
 
@@ -256,13 +258,13 @@ class Tor:
                 Tor.tor_cmd,
                 '--quiet',
                 '--hash-password',
-                self.password]).strip()
+                self.password]).strip().decode()
             if hashed_password:
                 return hashed_password
 
 
     def init_logging(self):
-        self.log = logging.getLogger('%s_%s' % (__name__, self.id))
+        self.log = logging.getLogger(f'{__name__}_{self.id}')
         self.log.addHandler(logging.NullHandler())
 
 
@@ -287,7 +289,7 @@ class Tor:
             if time.time() - self.last_new_id_time < self.delta:
                 self.log.debug('Restarting Tor to renew IP')
                 self.restart()
-                self.log.info('New IP: %s' % self.ip)
+                self.log.info('New IP: %s', self.ip)
                 self.changing_ip = False
                 self.last_new_id_time = 0
                 return self.ip
@@ -298,7 +300,7 @@ class Tor:
                     for attempt in range(self.check_ip_atempts):
                         new_ip = self.check_ip()
                         if new_ip and new_ip != self.ip:
-                            self.log.info('New IP: %s' % new_ip)
+                            self.log.info('New IP: %s', new_ip)
                             self.ip = new_ip
                             self.changing_ip = False
                             self.last_new_id_time = time.time()
@@ -310,42 +312,41 @@ class Tor:
 
     def open(self, url, data=None, headers=None, cookies=None, timeout=60):
         self.log.debug('%s request to %s\nHeaders: %s\nTimeout: %s'
-                       % ('GET' if data else 'POST', url, headers, timeout))
-        cookies = cookies or cookielib.LWPCookieJar()
-        opener = urllib2.build_opener(
+                       ,'GET' if data else 'POST', url, headers, timeout)
+        cookies = cookies or http.cookiejar.LWPCookieJar()
+        opener = urllib.request.build_opener(
             SocksiPyHandler(
                 socks.PROXY_TYPE_SOCKS5,
                 self.host, self.socks_port),
-            urllib2.HTTPCookieProcessor(cookies))
+            urllib.request.HTTPCookieProcessor(cookies))
         status_code = None
         if headers:
-            opener.addheaders = [item for item in headers.items()]
+            opener.addheaders = [item for item in list(headers.items())]
         try:
             response = opener.open(url, data, timeout)
-        except httplib.IncompleteRead as e:
+        except http.client.IncompleteRead as e:
             response = e.partial
         except Exception as e:
             if hasattr(e, 'code'):
                 status_code = e.code
-            self.log.debug('Failed to open %s, %s' % (url,e))
+            self.log.debug('Failed to open %s, %s', url, e)
             return Response(None, None, cookies)
         try:
             text = response.read()
         except Exception as e:
             text = None
-            self.log.debug('Unable to read response content: %s' % repr(e))
+            self.log.debug('Unable to read response content: %r', e)
         try:
             status_code = status_code or response.getcode()
         except Exception as e:
             status_code = None
-            self.log.debug('Error during getting response status code: %s'
-                           % repr(e))
+            self.log.debug('Error during getting response status code: %r', e)
 
         return Response(text, status_code, cookies)
 
 
     def post(self, url, data, **kwargs):
-        return self.open(url, data=urllib.urlencode(data), **kwargs)
+        return self.open(url, data=urllib.parse.urlencode(data), **kwargs)
 
 
     def restart(self):
@@ -360,13 +361,12 @@ class Tor:
             if not self.tor_started():
                 try:
                     self.log.info('Starting Tor process')
-                    self.log.debug('Running: %s'
-                                   % ' '.join(self.runtime_args))
+                    self.log.debug('Running: %s',
+                                   ' '.join(self.runtime_args))
                     proc = subprocess.Popen(self.runtime_args)
                     self.tor_process = proc
                 except Exception as e:
-                    self.log.error('Failed to start Tor process: %s'
-                                   % repr(e))
+                    self.log.error('Failed to start Tor process: %r', e)
                     return False
 
             time.sleep(0.5)
@@ -381,7 +381,7 @@ class Tor:
                         return True
 
                 except Exception as e :
-                    self.log.error('Tor not responding, %s' % e)
+                    self.log.error('Tor not responding, %s', e)
 
             self.log.error('Tor connection is not functional')
             self.log.info('Restarting Tor process')
@@ -392,24 +392,24 @@ class Tor:
         try:
             s = socket.socket()
             s.connect((self.host, self.control_port))
-            s.send('AUTHENTICATE "%s"\r\n' % self.password)
+            s.send(f'AUTHENTICATE "{self.password}"\r\n'.encode())
             resp = s.recv(1024)
 
-            if resp.startswith('250'):
-                s.send('signal %s\r\n' % signal)
+            if resp.startswith(b'250'):
+                s.send(f'signal {signal}\r\n'.encode())
                 resp = s.recv(1024)
 
-                if resp.startswith('250'):
-                    self.log.debug('Tor control signal "%s": SUCCESS' % signal)
+                if resp.startswith(b'250'):
+                    self.log.debug(f'Tor control signal "{signal}": SUCCESS')
                     return True
                 else:
-                    self.log.debug("response 2:%s" % resp)
+                    self.log.debug("response 2:%s", resp)
 
             else:
-                self.log.debug("response 1:%s" % resp)
+                self.log.debug("response 1:%s", resp)
 
         except Exception as e:
-            self.log.error('Tor %s signal FAILED, %s' % (signal, e))
+            self.log.error('Tor %s signal FAILED, %s', signal, e)
 
 
     def shutdown(self):

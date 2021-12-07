@@ -17,7 +17,7 @@ from threading import Thread
 def do_something():
     tor = Tor()
     for one in range(5):
-        response = tor.get('http://ip.barjomet.com')
+        response = tor.get('http://domain-name.com')
         print('Hooray, here is desired data: %s' %  response.text)
         tor.new_ip()
     tor.destroy()
@@ -40,7 +40,7 @@ while len(Tor.order) < 10:
 
 
 for incident in range(20):
-    response = Tor.first().get('http://ip.barjomet.com')
+    response = Tor.first().get('http://domain-name.com')
     print('Hooray, here is desired data: %s' %  response.text)
     while not Tor.next_tor():
         sleep(1)
